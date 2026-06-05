@@ -1,6 +1,6 @@
 # Procurement API
 
-Минимальный backend дипломного проекта на Django REST Framework.
+Mini-backend дипломного проекта на Django REST Framework.
 
 ## Локальный запуск
 
