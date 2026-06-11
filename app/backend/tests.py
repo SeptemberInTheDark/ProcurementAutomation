@@ -2,6 +2,7 @@ from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.cache import cache
 from django.test import TestCase, override_settings
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
@@ -30,6 +31,7 @@ class ImportPriceListTests(TestCase):
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+@override_settings(CELERY_TASK_ALWAYS_EAGER=True)
 class CustomerFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -98,6 +100,64 @@ class CustomerFlowTests(TestCase):
         orders = self.client.get("/api/v1/order")
         self.assertEqual(orders.status_code, 200)
         self.assertEqual(orders.data[0]["state"], Order.State.NEW)
+
+    def test_basket_update_validates_quantity(self):
+        user = get_user_model().objects.create_user(
+            email="buyer@example.com",
+            password="StrongPass123",
+            is_active=True,
+        )
+        token = Token.objects.create(user=user)
+        product_info = ProductInfo.objects.first()
+        order = Order.objects.create(user=user, state=Order.State.BASKET)
+        item = order.ordered_items.create(product_info=product_info, quantity=2)
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        response = self.client.put(
+            "/api/v1/basket",
+            {"items": [{"id": item.id, "quantity": None}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        item.refresh_from_db()
+        self.assertEqual(item.quantity, 2)
+
+
+class ThrottlingTests(TestCase):
+    @override_settings(
+        CELERY_TASK_ALWAYS_EAGER=True,
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+    )
+    def test_registration_is_throttled(self):
+        cache.clear()
+        client = APIClient()
+
+        for index in range(5):
+            response = client.post(
+                "/api/v1/user/register",
+                {
+                    "first_name": "Ivan",
+                    "last_name": "Petrov",
+                    "email": f"ivan{index}@example.com",
+                    "password": "StrongPass123",
+                },
+                format="json",
+            )
+            self.assertEqual(response.status_code, 201)
+
+        response = client.post(
+            "/api/v1/user/register",
+            {
+                "first_name": "Ivan",
+                "last_name": "Petrov",
+                "email": "ivan5@example.com",
+                "password": "StrongPass123",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 429)
 
 
 class PartnerFlowTests(TestCase):

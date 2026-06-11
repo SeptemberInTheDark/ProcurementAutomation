@@ -28,6 +28,16 @@ class RegisterSerializer(serializers.ModelSerializer):
         return User.objects.create_user(password=password, is_active=False, **validated_data)
 
 
+class ConfirmAccountSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    token = serializers.CharField()
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -87,7 +97,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ("id", "product_info", "product", "quantity", "sum")
         extra_kwargs = {"product_info": {"write_only": True}}
 
-    def get_sum(self, obj):
+    def get_sum(self, obj) -> int:
         return obj.quantity * obj.product_info.price
 
 
@@ -99,3 +109,12 @@ class OrderSerializer(serializers.ModelSerializer):
     class Meta:
         model = Order
         fields = ("id", "dt", "state", "contact", "ordered_items", "total_sum")
+
+
+class PartnerUpdateSerializer(serializers.Serializer):
+    file = serializers.FileField(required=False)
+    url = serializers.URLField(required=False)
+
+
+class PartnerStateSerializer(serializers.Serializer):
+    state = serializers.BooleanField()

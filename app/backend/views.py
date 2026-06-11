@@ -7,13 +7,16 @@ from rest_framework import generics, status
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from backend.models import ConfirmEmailToken, Contact, Order, OrderItem, ProductInfo
 from backend.serializers import (
+    ConfirmAccountSerializer,
     ContactSerializer,
+    LoginSerializer,
     OrderItemSerializer,
     OrderSerializer,
+    PartnerStateSerializer,
+    PartnerUpdateSerializer,
     ProductInfoSerializer,
     RegisterSerializer,
     ShopSerializer,
@@ -33,9 +36,14 @@ def parse_bool(value):
     raise ValueError("Invalid boolean value")
 
 
-class RegisterAccount(APIView):
+class RegisterAccount(generics.GenericAPIView):
+    """Register a buyer account and send an email confirmation token."""
+
+    serializer_class = RegisterSerializer
+    throttle_scope = "user_register"
+
     def post(self, request):
-        serializer = RegisterSerializer(data=request.data)
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         token = ConfirmEmailToken.objects.create(user=user)
@@ -43,11 +51,17 @@ class RegisterAccount(APIView):
         return Response({"Status": True}, status=status.HTTP_201_CREATED)
 
 
-class ConfirmAccount(APIView):
+class ConfirmAccount(generics.GenericAPIView):
+    """Confirm a registered account using the token sent by email."""
+
+    serializer_class = ConfirmAccountSerializer
+
     def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         token = ConfirmEmailToken.objects.filter(
-            user__email=request.data.get("email"),
-            key=request.data.get("token"),
+            user__email=serializer.validated_data["email"],
+            key=serializer.validated_data["token"],
         ).select_related("user").first()
         if not token:
             return Response({"Status": False, "Errors": "Invalid token or email"}, status=400)
@@ -57,12 +71,19 @@ class ConfirmAccount(APIView):
         return Response({"Status": True})
 
 
-class LoginAccount(APIView):
+class LoginAccount(generics.GenericAPIView):
+    """Authenticate an active user and return a DRF token."""
+
+    serializer_class = LoginSerializer
+    throttle_scope = "user_login"
+
     def post(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         user = authenticate(
             request,
-            username=request.data.get("email"),
-            password=request.data.get("password"),
+            username=serializer.validated_data["email"],
+            password=serializer.validated_data["password"],
         )
         if not user or not user.is_active:
             return Response({"Status": False, "Errors": "Invalid credentials"}, status=400)
@@ -70,20 +91,25 @@ class LoginAccount(APIView):
         return Response({"Status": True, "Token": token.key})
 
 
-class AccountDetails(APIView):
+class AccountDetails(generics.GenericAPIView):
+    """Read or update current user profile details."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = UserSerializer
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response(self.get_serializer(request.user).data)
 
     def post(self, request):
-        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        serializer = self.get_serializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"Status": True})
 
 
 class ProductInfoView(generics.ListAPIView):
+    """List products from active shops with optional shop, category, and search filters."""
+
     serializer_class = ProductInfoSerializer
 
     def get_queryset(self):
@@ -101,8 +127,11 @@ class ProductInfoView(generics.ListAPIView):
         )
 
 
-class BasketView(APIView):
+class BasketView(generics.GenericAPIView):
+    """Read, add, update, and delete items in the current user's basket."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = OrderSerializer
 
     def get(self, request):
         basket = self._get_basket(request.user)
@@ -127,9 +156,22 @@ class BasketView(APIView):
     def put(self, request):
         basket = self._get_basket(request.user)
         items = self._parse_items(request.data.get("items", []))
+        if not isinstance(items, list):
+            return Response({"Status": False, "Errors": "Invalid items"}, status=400)
+
         updated = 0
         for item in items:
-            updated += OrderItem.objects.filter(order=basket, id=item.get("id")).update(quantity=item.get("quantity"))
+            if not isinstance(item, dict):
+                return Response({"Status": False, "Errors": "Invalid item"}, status=400)
+
+            order_item = OrderItem.objects.filter(order=basket, id=item.get("id")).first()
+            if not order_item or "quantity" not in item:
+                return Response({"Status": False, "Errors": "Invalid item"}, status=400)
+
+            serializer = OrderItemSerializer(order_item, data={"quantity": item["quantity"]}, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            updated += 1
         return Response({"Status": True, "Updated": updated})
 
     def delete(self, request):
@@ -178,8 +220,11 @@ class ContactView(generics.ListCreateAPIView):
         return Response({"Status": True, "Deleted": deleted})
 
 
-class OrderView(APIView):
+class OrderView(generics.GenericAPIView):
+    """List submitted orders and turn a basket into a new order."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = OrderSerializer
 
     def get(self, request):
         orders = (
@@ -211,8 +256,12 @@ class OrderView(APIView):
         return Response({"Status": True})
 
 
-class PartnerUpdate(APIView):
+class PartnerUpdate(generics.GenericAPIView):
+    """Import a partner price list from an uploaded YAML file or remote URL."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = PartnerUpdateSerializer
+    throttle_scope = "partner_update"
 
     def post(self, request):
         if request.user.type != request.user.Type.SHOP:
@@ -231,8 +280,11 @@ class PartnerUpdate(APIView):
         return Response({"Status": True, "Imported": result.created_products})
 
 
-class PartnerState(APIView):
+class PartnerState(generics.GenericAPIView):
+    """Read or update current partner shop availability."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = PartnerStateSerializer
 
     def get(self, request):
         if request.user.type != request.user.Type.SHOP:
@@ -250,8 +302,11 @@ class PartnerState(APIView):
         return Response({"Status": True})
 
 
-class PartnerOrders(APIView):
+class PartnerOrders(generics.GenericAPIView):
+    """List non-basket orders that include current partner products."""
+
     permission_classes = [IsAuthenticated]
+    serializer_class = OrderSerializer
 
     def get(self, request):
         if request.user.type != request.user.Type.SHOP:
