@@ -13,6 +13,9 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+
   web:
     build: .
     command: >
@@ -25,11 +28,32 @@ services:
       POSTGRES_PASSWORD: orders
       DJANGO_ALLOWED_HOSTS: "*"
       EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build: .
+    command: celery -A config worker --loglevel=info
+    environment:
+      DB_HOST: db
+      POSTGRES_DB: orders
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+      EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
 volumes:
   postgres_data:

@@ -2,11 +2,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from django.conf import settings
-from django.core.mail import send_mail
 from django.db import transaction
 
 from backend.models import Category, Parameter, Product, ProductInfo, ProductParameter, Shop
+from backend.tasks import send_confirmation_email_task, send_order_emails_task
 
 
 @dataclass(frozen=True)
@@ -61,24 +60,8 @@ def import_price_list(source, *, user=None) -> ImportResult:
 
 
 def send_confirmation_email(user, token):
-    send_mail(
-        "Confirm registration",
-        f"Confirmation token: {token.key}",
-        settings.DEFAULT_FROM_EMAIL,
-        [user.email],
-    )
+    send_confirmation_email_task.delay(user.email, token.key)
 
 
 def send_order_emails(order):
-    send_mail(
-        "Order accepted",
-        f"Order #{order.id} accepted. Total: {order.total_sum}",
-        settings.DEFAULT_FROM_EMAIL,
-        [order.user.email],
-    )
-    send_mail(
-        "New order",
-        f"Order #{order.id} needs processing. Total: {order.total_sum}",
-        settings.DEFAULT_FROM_EMAIL,
-        [settings.ADMIN_EMAIL],
-    )
+    send_order_emails_task.delay(order.id)
