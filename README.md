@@ -5,15 +5,18 @@ Mini-backend дипломного проекта на Django REST Framework.
 ## Локальный запуск
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r ../requirements.txt
+pip install -r requirements.txt
+cd app
+export CELERY_TASK_ALWAYS_EAGER=True
 python manage.py migrate
-python manage.py test
+python manage.py test backend
 python manage.py runserver
 ```
 
 API будет доступен на `http://127.0.0.1:8000/api/v1/`.
+Swagger UI доступен на `http://127.0.0.1:8000/api/docs/`, схема OpenAPI - на `http://127.0.0.1:8000/api/schema/`.
 
 ## Docker
 
@@ -23,7 +26,7 @@ API будет доступен на `http://127.0.0.1:8000/api/v1/`.
 docker compose up --build
 ```
 
-Сервис поднимет PostgreSQL, применит миграции и запустит API на `http://127.0.0.1:8000/api/v1/`.
+Сервис поднимет PostgreSQL, Redis, Celery worker, применит миграции и запустит API на `http://127.0.0.1:8000/api/v1/`.
 
 Основные endpoint'ы:
 
@@ -36,3 +39,5 @@ docker compose up --build
 - `GET|POST /api/v1/order`
 - `POST /api/v1/partner/update`
 - `GET|POST /api/v1/partner/state`
+
+Для фоновой отправки писем используется Celery. В локальных тестах задачи можно выполнять синхронно через переменную `CELERY_TASK_ALWAYS_EAGER=True`.
